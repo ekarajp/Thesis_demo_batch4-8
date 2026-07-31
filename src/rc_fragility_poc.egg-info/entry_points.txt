@@ -1,0 +1,2 @@
+[console_scripts]
+fragility-poc = fragility_poc.cli:main

@@ -1,0 +1,301 @@
+Metadata-Version: 2.4
+Name: rc-fragility-poc
+Version: 0.1.0
+Summary: Five-storey multi-bay RC SPO-to-fragility demonstration pipeline
+Requires-Python: <3.11,>=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: joblib<2,>=1.3
+Requires-Dist: matplotlib<4,>=3.7
+Requires-Dist: numpy<2,>=1.24
+Requires-Dist: openseespy==3.5.1.3
+Requires-Dist: pandas<3,>=2.0
+Requires-Dist: scikit-learn<2,>=1.3
+Requires-Dist: scipy<2,>=1.10
+Provides-Extra: test
+Requires-Dist: pytest<9,>=8; extra == "test"
+Requires-Dist: pytest-cov<7,>=5; extra == "test"
+
+# RC 5-Storey Multi-Bay Fragility ANN Research Pipeline
+
+โปรแกรม Proof of Concept แบบ end-to-end สำหรับอาคารคอนกรีตเสริมเหล็ก
+3D moment frame สูง 5 ชั้น แปลนสมมาตร 1×1 ถึง 5×5 bay ตามขอบเขต
+Proposal Draft 5:
+
+```text
+catalog + optimum member design
+→ gravity / modal / SPO
+→ bidirectional NLTHA-based IDA
+→ fragility IO / LS / CP
+→ leakage-safe ANN evaluation
+```
+
+## ขอบเขตที่ล็อกไว้
+
+- หน่วยวิเคราะห์ `kN-m-s`, fixed base, rigid diaphragm, P-Delta และ modal
+  damping คงที่ 5% ทุกอาคาร/ทุก production analysis (ไม่ทำ damping sensitivity)
+- gravity design combination ใช้ `1.4D + 1.7L`
+- พื้นประกอบด้วย panel สี่เหลี่ยมแบบ two-way ที่ถ่ายน้ำหนักให้คานทั้งสี่ด้าน:
+  คานขอบรับ `tributary width = L/4` และคานภายในรับ `L/2`
+  ทั้งใน preliminary design และ OpenSees
+- nonlinear seismic model ใช้ service seismic weight `1.0D + 0.25L`
+- Draft 5 มี raw base cases สูงสุด 1,500 กรณีจาก `number of bays`,
+  bay width, concrete strength, SDL และ LL; ใช้ beam/column target strength
+  4 tiers (`100, 120, 140, 160%`) และอนุญาต 10 คู่ที่
+  `column target >= beam target`
+- Firefly แบบ multi-start ใช้ค้นหาแบบไม่ต่อเนื่อง และ exact enumeration
+  ตรวจรับรอง optimum ภายใน candidate library ที่ก่อสร้างได้
+- เกณฑ์ฐานข้อมูลวิจัยใช้ minimum non-roof-joint
+  `sum(Mnc_column)/sum(Mnb_beam) > 1.00` โดยไม่อ้างว่าเป็นการตรวจ
+  ACI SCWB code compliance
+- column P-M design ใช้ factored axial load ร่วมกับโมเมนต์สมดุลที่ปลายเสา
+  เท่ากับครึ่งหนึ่งของผลรวม design moment ของคานใน directional joint;
+  ไม่ใช้ proxy เดิม `0.10Pu × storey height`
+- แบ่งอาคารที่ยอมรับแล้วเป็น `research-low-margin` (1.00<R<1.50),
+  `research-medium-margin` (1.50≤R<3.00) และ `research-high-margin`
+  (≥3.00) เพื่อ balanced sampling และตรวจความแม่นยำ ANN เท่านั้น
+- balanced sampling บังคับให้ครอบคลุม geometry ที่ feasible และกระจายคู่
+  beam/column target-strength ทั้ง 10 คู่เท่า ๆ กัน (ต่างกันไม่เกิน 1 หลัง)
+  พร้อมใช้ capacity-constrained allocation กับ SCWB class โดยไม่ทำซ้ำโมเดล
+- ANN หลักใช้ 7 inputs เท่านั้น:
+  `[Vy, Dy, Vc, Dc, Vu, Du, T1]`
+- Run End และ mechanism history เก็บเป็นข้อมูลตรวจสอบ ไม่ป้อนเข้า ANN หลัก
+- production queue สูงสุดของ Demo คือ 375 อาคาร โดยเริ่มงานจริงทีละ batch
+  50 อาคารและ resume ต่อได้; เป้าหมาย ML ขั้นสุดท้ายอยู่ในช่วง 100–375
+  อาคารที่มี full IDA ครบ
+
+## Structural model รุ่นปัจจุบัน
+
+Model schema:
+
+```text
+rc3d-hinge-midpoint-hognestad-mander-hysteretic-
+firefly-multistart-adaptive-aci-spacing-
+capacity-shear-clear-span-multibay-equal-edge-gravity-
+strain-compatible-column-pm-research-rgt1-
+priestley-contraflexure-lp-mesh24-effective-modal-mass-
+column-joint-equilibrium-no-storyheight-proxy-v32
+```
+
+- สมาชิกใช้ `forceBeamColumn` และ `HingeMidpoint`
+- คานใช้หน้าตัดสี่เหลี่ยมโดยไม่รวม T-beam effective flange เป็นสมมติฐาน
+  conservative ที่ล็อกไว้
+- plastic hinges อยู่ที่ปลายทั้งสองด้านของคานและเสาในทุกทิศทาง
+- production plastic-hinge length ใช้สมการ Priestley
+  `Lp=max(0.08Ls+0.022fye·db, 0.044fye·db)` โดย `fye=1.25fy` และ
+  `Ls=abs(M/V)` จาก elastic reference frame แบบ rigid diaphragm ภายใต้
+  inverted-triangular lateral load; `Ls` คือระยะจาก critical section
+  ถึง point of contraflexure ไม่ใช่ bay width หรือ storey height เต็มช่วง;
+  ค่าแบบ `0.5h` ไม่ได้ใช้ใน production หรือ sensitivity ชุดปัจจุบัน
+- production fiber mesh ใช้ core 24×24; convergence checks ใช้ 16×16 และ
+  32×32 กับตัวแทน low/medium/high margin โดย 16×16→24×24 เปลี่ยนผล SPO
+  สูงสุด 12.14% แต่ 24×24→32×32 เปลี่ยนสูงสุดเพียง 0.902% จึงผ่าน
+  numerical-convergence tolerance 10%
+- โปรแกรมตรวจ actual integration points/weights จาก OpenSees ทุก model;
+  weights ต้องเป็นบวก อยู่ภายในสมาชิก และรวมเท่ากับความยาวสมาชิก
+- cover concrete ใช้ Hognestad-type law, confined core ใช้ Mander-type law
+  และ `eps_cu` คือ concrete failure limit
+- เหล็กใช้ cyclic post-peak-capable hysteretic law
+- คานและเสาต้องผ่าน capacity-design shear screen ก่อนเข้าฐานข้อมูล
+  เพื่อคงสมมติฐานว่า nonlinear response ถูกควบคุมด้วย flexure; ตัว fiber
+  section ไม่ได้จำลอง shear degradation หรือ brittle shear failure
+- กำลังดัดเสาและ research column/beam ratio ใช้ strain-compatible P–M capacity จากตำแหน่งเหล็ก
+  จริงที่ค่าแรงอัดตามแต่ละชั้น; ไม่ใช้ linear interaction approximation
+- การระบุ mode X/Y ใช้ directional effective modal mass ซึ่งรวม generalized
+  mass ของ UX, UY และ RZ, บังคับให้ X/Y เป็นคนละ mode และต้องเก็บ cumulative
+  translational mass ได้อย่างน้อย 90%; ไม่ใช้ผลรวม eigenvector
+- หากขอบเขต 5 ชั้นหลาย bay ไม่มีบาง research margin band โปรแกรมจะรายงานตามจริง
+  และเลือก sensitivity cases ให้ครอบคลุมช่วง column/beam ratio ที่มีอยู่
+  โดยไม่สร้างหรือทำซ้ำอาคารเพื่อให้ครบ class
+- SPO ดันต่อไปจนถึง flexural-model endpoint/nonconvergence ที่ผ่าน retry protocol
+  ไม่หยุดเพราะ drift cap หรือกำลังลดถึง 75%
+- trilinear fit ใช้ elastic branch + post-yield/pre-capping branch,
+  `Vc=max(V)` และ ultimate เป็นจุด post-peak ใกล้ `0.80Vc`
+- QC: total energy ≤5%, pre-capping energy ≤10%,
+  post-capping energy ≤10%, NRMSE ≤10%
+
+## Ground motions และ IDA
+
+- CMS Zone 5 จำนวน 23 catalog pairs และ PWSA ปี 2568 จำนวน 1 pair
+- CMS X-Y pairing ตรวจจาก source manifest/ReadMe พร้อม path และ checksum
+- raw component files ไม่ถูกแก้; response spectrum และ NLTHA ใช้ analysis
+  copies ที่ผ่าน deterministic linear least-squares detrend พร้อมตรวจ residual
+  velocity/displacement และเก็บ checksum แยก
+- physical-pair hash ป้องกัน record X-Y เดียวกันถูกเลือกซ้ำให้อาคารเดียว
+- เลือก CMS family ที่ conditioning period ใกล้ `T1`; ถ้า `T1`
+  อยู่ในช่วงกึ่งกลาง ใช้ทั้งสอง family ข้างเคียง
+- X และ Y ใช้ scale factor เดียวกัน; IM คือ geometric-mean `Sa(T1,5%)`
+- IDA hunt ไม่หยุดที่ 4.0g: ค่านี้เป็น soft warning เท่านั้น
+- hunt ต่อจนพบ first crossing ของ CP แล้วจึง fill bracket
+- ถ้าชน numerical/safety guard ก่อนพบ CP เส้นนั้นเป็น invalid และไม่สร้าง
+  censored/fabricated CP label
+- scale-factor safety guard ถูกตรวจทั้งใน `run_nltha` และ internal
+  `_single_nltha_attempt` ก่อนเรียก solver จึงข้าม guard ผ่าน direct call,
+  sensitivity, hunt หรือ fill ไม่ได้
+- Production Demo uses `hybrid_active_v1`: a checksum-frozen random-forest
+  surrogate blended with an SPO yield-Sa heuristic proposes only the first IM
+  points. It never creates IO/LS/CP labels.
+- Every uncensored capacity still requires an actual below-threshold NLTHA and
+  a certified above-threshold NLTHA. The controller expands up/down when its
+  prediction is wrong and refines every IO/LS/CP bracket to a maximum 5%
+  relative IM width. There is no hard point-count cap. Eighteen points is only
+  a soft Codex-review threshold and never stops accuracy-driven refinement.
+- Controller predictions, point phases, final bracket widths, worst-case
+  capacity-localization error bounds, review flags, artifact hash and point
+  counts are retained in `ida_curve_diagnostics`. The frozen 5% hunt-and-fill
+  implementation is archived separately as the reference method.
+- The production decision policy is Codex-reviewed but self-contained: the
+  frozen RF/SPO model places the first points, measured failure/crossing logic
+  expands the curve, and minimax log-bisection closes each mandatory bracket.
+  Retrospective tests rejected response-guided secant refinement because it
+  required more NLTHA points despite estimating the crossing closely.
+- No live Codex/API connection is required inside OpenSees. This is deliberate:
+  a multi-day batch remains deterministic, auditable, restartable, and able to
+  continue through an internet or Codex-session interruption. Codex supervises
+  diagnostics/outliers and changes a frozen policy only between declared
+  batches.
+- `add-ida-points` runs only the IM values explicitly requested by Codex or
+  the user. It signature-checks and reuses every existing fixed-IM checkpoint,
+  then rebuilds only the affected curve and building fragility. Requests are
+  retained in `ida_manual_point_requests`; no other curve is rerun.
+- จำนวน GM ต่อ CMS family มีเพียง 3–4 คู่ เป็นข้อจำกัดข้อมูลที่ประกาศไว้
+- benchmark/pilot ที่ระบุขอบเขตชัดเจนสามารถรันก่อนมี SPO ครบ 20 อาคารได้;
+  Building IDs ที่ถูกเปิดเผยจะถูกบังคับเข้า development set เมื่อสร้าง split
+  ภายหลัง ส่วน full unrestricted IDA batch ต้องสร้าง label-blind split ก่อน
+
+## Engineering-screening scope
+
+โปรแกรมตรวจ strength, serviceability/deflection, reinforcement limits,
+axial-flexural interaction, shear, research column/beam margin band, confinement geometry,
+gravity equilibrium และ constructability ที่จำเป็นต่อ research archetype
+แต่ไม่อ้างว่าเป็นโปรแกรมออกแบบก่อสร้างฉบับสมบูรณ์ รายการต่อไปนี้อยู่นอก
+ขอบเขตที่ตกลงไว้: detailed slab flexural design, nonlinear member shear
+failure/degradation, joint shear, development length/splice, bond-slip,
+bar buckling และ detailed torsional design/failure.
+โมเดลยังคงมี elastic Saint-Venant torsional stiffness ที่จำเป็นต่อสมาชิก 3D.
+คำว่า model endpoint/dynamic instability ในผลลัพธ์จึงไม่ใช่คำกล่าวอ้างว่า
+จำลอง physical collapse ซึ่งรวม failure modes ที่อยู่นอกขอบเขตได้ครบแล้ว
+
+## ติดตั้ง
+
+```powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
+.\.venv\Scripts\python.exe -m pip install . --no-deps --force-reinstall
+```
+
+The operational project path is
+`D:\QCE-NAS\Ekaraj Private Data\Civil Engineering\phD\Research\Demo Program`.
+`phD` is an ASCII junction to the existing jSync-managed directory because
+the sync reparse point cannot be renamed safely from Windows Explorer or
+PowerShell. Do not use `pip install -e` in Python 3.10 at the underlying Thai
+path; its raw editable `.pth` can be decoded with the legacy Windows code page
+before Python enables UTF-8. The locked non-editable installation above is
+the reproducible production setup.
+
+เมื่อต้องการสร้าง Excel consolidated นอก Codex runtime ให้กำหนด
+`FRAGILITY_POC_NODE_EXE` และ `FRAGILITY_POC_NODE_MODULES`
+ไปยัง Node และ directory ที่มี `@oai/artifact-tool`.
+
+## CLI
+
+```powershell
+fragility-poc --config config/poc.json validate-records
+fragility-poc --config config/poc.json build-catalog
+fragility-poc --config config/poc.json run-modal-spo
+fragility-poc --config config/poc.json plastic-hinge-sensitivity
+fragility-poc --config config/poc.json modeling-sensitivity
+fragility-poc --config config/poc.json select-records
+fragility-poc --config config/poc.json benchmark-ida
+fragility-poc --config config/poc.json run-ida
+fragility-poc --config config/poc.json add-ida-points --building-id B-ID --pair-id CMS-T1.0-P01 --target-im-g 0.75 --reason "Codex review"
+fragility-poc --config config/poc.json fit-fragility
+fragility-poc --config config/poc.json train-ann
+fragility-poc --config config/poc.json evaluate
+fragility-poc --config config/poc.json make-workbook
+fragility-poc --config config/poc.json make-demo
+```
+
+Production runs in deterministic batches of 50:
+
+```powershell
+# Read-only gate before the first production batch. It verifies the database,
+# 375-building queue, GM catalogue, structural audit, current sensitivity
+# reports, dependency/config freeze, backup integrity, and available disk.
+.\.venv\Scripts\python.exe scripts/preflight_batch50.py `
+  --config config/poc.json `
+  --backup backups/5storey/poc_ready_hybrid_batch50_YYYYMMDD_HHMM.sqlite
+
+# For Batch 001 only, migrate the safely paused pre-IDA manifest after the
+# readiness report is READY. The command refuses to run if any production IDA
+# or fragility label already exists.
+.\.venv\Scripts\python.exe scripts/migrate_batch01_to_hybrid.py
+.\.venv\Scripts\python.exe scripts/migrate_batch01_to_hybrid.py --apply
+
+# Restartable Batch 001 runner. It reuses the 50 completed SPO results and
+# saved GM selections, then resumes every atomic target-IM JSON checkpoint.
+.\.venv\Scripts\python.exe scripts/run_batch01_full50.py
+
+# Live, restart-safe status for the user/Codex supervisor. It is refreshed
+# every 30 seconds and raises codex_review_required for a fallback predictor,
+# an excessive bracket, or an unusually point-heavy curve.
+Get-Content runs/5storey/batches/batch_001/progress.json
+
+# Stage A: run all 375 modal/SPO analyses. Repeating the same command advances
+# to the next pending 50 and resumes an interrupted building from its outputs.
+fragility-poc --config config/poc.json run-modal-spo --limit 50
+
+# Repeat Stage A until remaining_after_batch = 0. Production IDA is gated
+# until every selected Building ID has a current valid SPO result, preventing
+# label leakage or a changing 80/20 population.
+fragility-poc --config config/poc.json select-records
+fragility-poc --config config/poc.json create-ml-split
+
+# Stage B: each repeated call advances to the next 50 buildings whose selected
+# record curves do not yet have current IO/LS/CP capacities.
+fragility-poc --config config/poc.json run-ida --limit 50 --workers 6
+
+# It is valid to stop after a predeclared completed population of 100–375
+# Building IDs. Never recreate the label-blind split after any IDA capacity
+# has been observed.
+```
+
+Reproducible bounded-pilot helpers:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/audit_selected_models.py
+.\.venv\Scripts\python.exe scripts/warm_catalog_cache.py --config config/poc.json --workers 5
+.\.venv\Scripts\python.exe scripts/select_balanced_spo_pilot.py --size 36 --ida-size 12
+.\.venv\Scripts\python.exe scripts/freeze_pilot_version.py
+.\.venv\Scripts\python.exe scripts/audit_pilot_results.py
+```
+
+`build-catalog` checkpoints every expensive exact/FFA base-design result in
+the same SQLite database table `catalog_design_cache`. The cache key includes
+the complete model/design/price/optimizer configuration. Repeating the command
+after interruption therefore computes only missing searches. The optional
+cache warmer partitions the independent concrete-strength groups across
+workers; the final `build-catalog` remains the sole deterministic queue
+assembly step.
+
+Fragility IO/LS/CP สำหรับชุดข้อมูลวิจัยใช้ first-crossing IM capacity ที่
+วิเคราะห์ได้ครบทุก GM เท่านั้น โดย `theta` คือ geometric mean และ
+`beta_RTR` คือ Bessel-corrected sample standard deviation ของ
+`ln(first-crossing IM capacity)` (`ddof=1`). หากมี censored capacity
+โปรแกรมจะไม่สร้าง label สำหรับ ML และรายงานให้นำ IDA curve นั้นกลับไปรัน
+จนได้ first crossing ที่สมบูรณ์.
+
+`run-ida` แยกทุก curve ด้วย worker process, บันทึก atomic checkpoint ต่อ
+target IM และใช้ rolling scheduler ที่ให้หนึ่ง curve ต่อ fresh native
+process เสมอ. Curve ต้นทุนสูงจาก record ยาว/โมเดลหลาย bay ถูกจัดก่อนด้วย
+ข้อมูล duration, dt และจำนวน bay เท่านั้น โดยไม่ใช้ response label; เมื่อ
+worker หนึ่งเสร็จ งานถัดไปเริ่มทันทีจึงไม่ต้องรอ PWSA ที่ขอบ chunk. หาก native
+OpenSees worker จบกะทันหัน โปรแกรมจะ resume เฉพาะ curve นั้นด้วย fresh
+isolated process สูงสุด 2 ครั้ง โดยไม่ทำให้ curve อื่นสูญผลที่สำเร็จแล้ว.
+สำหรับการซ่อมหรือตรวจเฉพาะคู่ที่เลือกไว้แล้ว ใช้
+`--pair-id CMS-T1.0-P01`; completion signature guard จะข้าม curve ที่มี
+IO/LS/CP ปัจจุบันครบแล้วโดยไม่สร้าง OpenSees worker ซ้ำ.
+
+ผลลัพธ์หลักถูกรวมไว้ที่
+`outputs/5storey/RC_Fragility_PoC_Summary.xlsx`.
+รายงานจะนับเฉพาะผลที่ analysis/model/source signatures ตรงกับ schema
+และ configuration ปัจจุบัน จึงไม่ผสมผลจากโมเดลรุ่นเก่าโดยเงียบ ๆ

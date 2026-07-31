@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+runtime/*
+runtime_storage/*
+runs/*
+outputs/*
+exports/*
+logs/*
+backups/*
+
+*.sqlite-wal
+*.sqlite-shm
+RC_Fragility_Server_Batches_04_08.zip
