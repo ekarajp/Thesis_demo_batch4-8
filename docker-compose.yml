@@ -1,0 +1,38 @@
+# Run the RC fragility batch server in a container.
+#
+#   docker compose up        # build + start dashboard at http://localhost:8765
+#   docker compose down      # stop (volumes retained)
+#   docker compose down -v   # stop AND delete generated data in named volumes
+#
+# `data/` is bind-mounted from the host so you can drop the correct ground-motion
+# files into data/ground_motion/processed/... and the container sees them with no
+# rebuild. A real run writes results/checkpoints back into data/*.sqlite (same as
+# on Windows) — back it up first if you want the pristine committed copy.
+# Results in exports/ live in a named volume; fetch with `docker cp` or the
+# dashboard's download button (avoids host ownership friction).
+services:
+  rcfragility:
+    build: .
+    image: rc-fragility-poc:batch004-008
+    container_name: rc-fragility
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/app/data
+      - rcfrag-runtime-storage:/app/runtime_storage
+      - rcfrag-runs:/app/runs
+      - rcfrag-outputs:/app/outputs
+      - rcfrag-exports:/app/exports
+      - rcfrag-logs:/app/logs
+      - rcfrag-backups:/app/backups
+    # Cap restarts so a fatal preflight/data block doesn't loop forever.
+    # (For a long batch you may prefer `unless-stopped` once the run is healthy.)
+    restart: "on-failure:3"
+
+volumes:
+  rcfrag-runtime-storage:
+  rcfrag-runs:
+  rcfrag-outputs:
+  rcfrag-exports:
+  rcfrag-logs:
+  rcfrag-backups:

@@ -61,8 +61,12 @@ def rewrite_ground_motion_paths(root: Path, database: Path) -> int:
                 f"Expected 24 valid ground-motion pairs; found {len(rows)}"
             )
         for row in rows:
-            x_path = processed / Path(str(row["component_x_path"])).name
-            y_path = processed / Path(str(row["component_y_path"])).name
+            # The SQLite catalog stores absolute Windows paths (backslash
+            # separators). Normalize to forward slashes before taking the base
+            # name so relocation also works on POSIX, where '\' is a legal path
+            # character rather than a separator. No-op on Windows.
+            x_path = processed / Path(str(row["component_x_path"]).replace("\\", "/")).name
+            y_path = processed / Path(str(row["component_y_path"]).replace("\\", "/")).name
             if not x_path.is_file() or not y_path.is_file():
                 raise FileNotFoundError(
                     f"Processed GM files missing for {row['pair_id']}"

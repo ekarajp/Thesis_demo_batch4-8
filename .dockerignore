@@ -1,0 +1,27 @@
+# Exclude everything not needed inside the Linux container.
+# The Windows wheelhouse is useless here (all *-win_amd64.whl).
+.git
+.gitignore
+.venv
+__pycache__
+*.py[cod]
+wheelhouse
+ψ
+
+# Runtime-generated output dirs (created fresh / mounted as volumes at run time).
+runtime
+runtime_storage
+runs
+outputs
+exports
+logs
+backups
+*.sqlite-wal
+*.sqlite-shm
+*.zip
+
+# Docker own files (don't copy into the image).
+Dockerfile
+Dockerfile.*
+.dockerignore
+docker-compose*.yml
