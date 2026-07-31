@@ -41,6 +41,14 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--root", type=Path, default=Path(__file__).resolve().parent)
+    ap.add_argument(
+        "--update-db-checksums",
+        action="store_true",
+        help="Re-compute sha256 for the 48 committed GM files and write them into "
+        "ground_motion_catalog, declaring the in-repo files as the run inputs. Only "
+        "use this if you accept the in-git ground-motion set (the DB holds no prior "
+        "results). Git retains the original; revert with 'git checkout -- <db>'.",
+    )
     args = ap.parse_args()
     root: Path = args.root.resolve()
 
@@ -64,6 +72,40 @@ def main() -> int:
     valid = [r for r in rows if r["valid"]]
     print(f"DB catalog: {len(rows)} pairs ({len(valid)} valid); expected {EXPECTED_PAIRS} valid")
     print(f"Processed dir: {proc}\n")
+
+    if args.update_db_checksums:
+        updated = 0
+        con = sqlite3.connect(db)
+        try:
+            for r in valid:
+                for axis, path_col, sha_col in (
+                    ("X", "component_x_path", "sha256_x"),
+                    ("Y", "component_y_path", "sha256_y"),
+                ):
+                    f = proc / base_name(str(r[path_col]))
+                    if not f.is_file():
+                        raise FileNotFoundError(
+                            f"missing GM file for {r['pair_id']}_{axis}: {f}"
+                        )
+                    con.execute(
+                        f"UPDATE ground_motion_catalog SET {sha_col}=? WHERE pair_id=?",
+                        (sha256(f), r["pair_id"]),
+                    )
+                    updated += 1
+            con.commit()
+        finally:
+            con.close()
+        print(f"Re-blessed {updated} checksums in ground_motion_catalog to match the in-repo files.")
+        print(f"(Original retained by git — revert with: git checkout -- {DB_REL})\n")
+        # re-fetch so the verification below reflects the updated database
+        con = sqlite3.connect(db)
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            "SELECT pair_id, component_x_path, component_y_path, sha256_x, sha256_y, valid "
+            "FROM ground_motion_catalog ORDER BY pair_id"
+        ).fetchall()
+        con.close()
+        valid = [r for r in rows if r["valid"]]
 
     ok_pairs = 0
     missing = bad = 0
