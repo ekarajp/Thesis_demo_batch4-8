@@ -17,6 +17,12 @@ services:
     container_name: rc-fragility
     ports:
       - "8765:8765"
+    # Cap the container to 8 cores of CPU time. Keep the dashboard "workers"
+    # box <= 8 so the orchestrator doesn't oversubscribe this quota.
+    deploy:
+      resources:
+        limits:
+          cpus: "8.0"
     volumes:
       - ./data:/app/data
       - rcfrag-runtime-storage:/app/runtime_storage
