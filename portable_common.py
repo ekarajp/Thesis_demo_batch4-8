@@ -133,6 +133,27 @@ def building_rows(
 def ids_for_batch(
     connection: sqlite3.Connection, batch_id: str
 ) -> list[str]:
+    slot_table = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='batch_building_slots'
+        """
+    ).fetchone()
+    if slot_table is not None:
+        assigned = [
+            str(row[0])
+            for row in connection.execute(
+                """
+                SELECT current_building_id
+                FROM batch_building_slots
+                WHERE batch_id=?
+                ORDER BY slot_rank
+                """,
+                (batch_id,),
+            )
+        ]
+        if assigned:
+            return assigned
     rank_start, rank_end = BATCHES[batch_id]
     return [
         str(row[0])
@@ -398,6 +419,34 @@ def progress_snapshot(database: str | Path) -> dict[str, Any]:
                 """
             )
         }
+        slot_assignments: dict[str, dict[str, Any]] = {}
+        quarantine_by_batch: dict[str, int] = {}
+        replacement_table = connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type='table' AND name='batch_building_slots'
+            """
+        ).fetchone()
+        if replacement_table is not None:
+            slot_assignments = {
+                str(row["current_building_id"]): dict(row)
+                for row in connection.execute(
+                    """
+                    SELECT batch_id,slot_rank,original_building_id,
+                           current_building_id,replacement_generation
+                    FROM batch_building_slots
+                    """
+                )
+            }
+            quarantine_by_batch = {
+                str(row["batch_id"]): int(row["quarantine_count"])
+                for row in connection.execute(
+                    """
+                    SELECT batch_id,COUNT(*) AS quarantine_count
+                    FROM spo_quarantine GROUP BY batch_id
+                    """
+                )
+            }
 
     package_root = Path(database).absolute().parent.parent
     ida_checkpoint_root = package_root / "runs" / "ida"
@@ -472,6 +521,18 @@ def progress_snapshot(database: str | Path) -> dict[str, Any]:
                 ),
                 "ida_runtime_s": round(float(run_data["runtime_s"]), 3),
                 "unresolved_failures": unresolved.get(building_id, 0),
+                "original_building_id": (
+                    str(slot_assignments[building_id][
+                        "original_building_id"
+                    ])
+                    if building_id in slot_assignments
+                    else building_id
+                ),
+                "replacement_generation": int(
+                    slot_assignments.get(
+                        building_id, {"replacement_generation": 0}
+                    )["replacement_generation"]
+                ),
             }
         )
 
@@ -507,6 +568,9 @@ def progress_snapshot(database: str | Path) -> dict[str, Any]:
                 "unresolved_failures": sum(
                     int(row["unresolved_failures"]) for row in items
                 ),
+                "quarantined_spo_models": quarantine_by_batch.get(
+                    batch_id, 0
+                ),
             }
         )
     return {
@@ -522,4 +586,5 @@ def progress_snapshot(database: str | Path) -> dict[str, Any]:
         ),
         "batches": batch_rows,
         "buildings": output_buildings,
+        "quarantined_spo_models": sum(quarantine_by_batch.values()),
     }

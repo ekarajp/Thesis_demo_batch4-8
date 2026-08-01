@@ -86,7 +86,7 @@ def make_result_database(
 
 
 def report_rows(
-    connection: sqlite3.Connection, ids: list[str]
+    connection: sqlite3.Connection, ids: list[str], batch_id: str
 ) -> dict[str, list[dict[str, Any]]]:
     placeholders = marks(ids)
     buildings = query_dicts(
@@ -130,11 +130,37 @@ def report_rows(
                 f"ORDER BY {order}"
             )
         tables[name] = query_dicts(connection, sql, ids)
+    replacement_table = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='spo_replacement_history'
+        """
+    ).fetchone()
+    if replacement_table is not None:
+        tables["spo_quarantine"] = query_dicts(
+            connection,
+            """
+            SELECT * FROM spo_quarantine
+            WHERE batch_id=? ORDER BY slot_rank,first_quarantined_utc
+            """,
+            [batch_id],
+        )
+        tables["spo_replacement_history"] = query_dicts(
+            connection,
+            """
+            SELECT * FROM spo_replacement_history
+            WHERE batch_id=? ORDER BY slot_rank,generation
+            """,
+            [batch_id],
+        )
     return tables
 
 
 def raw_files(
-    connection: sqlite3.Connection, ids: list[str], root: Path
+    connection: sqlite3.Connection,
+    ids: list[str],
+    root: Path,
+    batch_id: str,
 ) -> list[dict[str, Any]]:
     placeholders = marks(ids)
     rows = []
@@ -191,6 +217,47 @@ def raw_files(
                     "_source": source,
                 }
             )
+    replacement_table = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='spo_quarantine'
+        """
+    ).fetchone()
+    if replacement_table is not None:
+        for row in connection.execute(
+            """
+            SELECT building_id,curve_path,mechanism_history_path
+            FROM spo_quarantine WHERE batch_id=?
+            """,
+            (batch_id,),
+        ):
+            for key in ("curve_path", "mechanism_history_path"):
+                if not row[key]:
+                    continue
+                source = Path(str(row[key]))
+                if not source.is_file() or source.stat().st_size <= 0:
+                    continue
+                try:
+                    relative = source.absolute().relative_to(root.absolute())
+                    archive_relative = Path("raw") / relative
+                except ValueError:
+                    archive_relative = (
+                        Path("raw")
+                        / "quarantine"
+                        / (sha256(source)[:12] + "_" + source.name)
+                    )
+                rows.append(
+                    {
+                        "table": "spo_quarantine",
+                        "path_column": key,
+                        "building_id": str(row["building_id"]),
+                        "original_path": str(source),
+                        "archive_path": archive_relative.as_posix(),
+                        "size_bytes": source.stat().st_size,
+                        "sha256": sha256(source),
+                        "_source": source,
+                    }
+                )
     unique: dict[str, dict[str, Any]] = {}
     for row in rows:
         key = row["original_path"]
@@ -257,8 +324,8 @@ def export_batch(root: Path, batch_id: str) -> dict[str, Any]:
             raise RuntimeError(
                 f"{batch_id}: only {valid_fragility}/{expected} valid fragilities"
             )
-        reports = report_rows(connection, ids)
-        raw = raw_files(connection, ids, root)
+        reports = report_rows(connection, ids, batch_id)
+        raw = raw_files(connection, ids, root, batch_id)
         gm_signature = ground_motion_signature(connection)
         model_rows = [
             dict(row)
@@ -331,6 +398,12 @@ def export_batch(root: Path, batch_id: str) -> dict[str, Any]:
         "queue_rank_range": [rank_start, rank_end],
         "building_count": len(ids),
         "buildings": model_rows,
+        "spo_replacements": reports.get(
+            "spo_replacement_history", []
+        ),
+        "spo_quarantine_count": len(
+            reports.get("spo_quarantine", [])
+        ),
         "phase": "data_generation_only_no_ml",
         "scientific_config_signature": scientific_config_signature(
             root / "config" / "poc.json"

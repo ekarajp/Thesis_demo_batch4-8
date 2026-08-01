@@ -1,0 +1,12 @@
+# This repository is also a checksum-locked portable research package.
+* text=auto eol=lf
+
+# These files are generated and checksummed with CRLF by the Windows research
+# pipeline. Lock their checkout representation on every operating system.
+config/poc.json text eol=crlf
+data/ground_motion/**/*.txt text eol=crlf
+src/fragility_poc/db.py text eol=crlf
+
+# SQLite databases are BINARY. Never line-ending-normalize them — the
+# "* text=auto eol=lf" rule above corrupts these files on checkout.
+*.sqlite binary
