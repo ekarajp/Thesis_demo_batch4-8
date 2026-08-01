@@ -1,0 +1,17 @@
+{
+  "schema": "full-five-storey-catalog-v2",
+  "created_utc": "2026-08-01T10:52:36.231902+00:00",
+  "source_database": "D:\\QCE-NAS\\Ekaraj Private Data\\Civil Engineering\\phD\\Research\\Demo Program\\data\\5storey\\poc.sqlite",
+  "source_database_sha256": "2c25b223411dc5c463f906e7f2e6fd0a194f3ce3c4f8448cc8f723d49c970678",
+  "target_database": "D:\\QCE-NAS\\Ekaraj Private Data\\Civil Engineering\\phD\\Research\\Demo Program\\build\\RC_Fragility_Server_Batches_04_08\\data\\spo_replacement_reserve.sqlite",
+  "target_database_sha256": "d264a7e7b61d83fb3dedc6ebe9df3a2fe703065fe2a6e3ded9a3c6df58a1ae24",
+  "server_target_count": 225,
+  "catalogue_model_count": 6908,
+  "valid_model_count": 6901,
+  "invalid_model_count": 7,
+  "globally_selected_valid_model_count": 375,
+  "eligible_replacement_model_count": 6526,
+  "replacement_filter": "stories=5 AND valid=1 AND selected=0",
+  "catalogue_is_complete_for_source_database": true,
+  "design_metadata_storage": "zlib-compressed-utf8-lossless"
+}
