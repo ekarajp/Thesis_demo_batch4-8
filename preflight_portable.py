@@ -7,6 +7,7 @@ import json
 import platform
 import sqlite3
 import sys
+import zlib
 from pathlib import Path
 
 from portable_common import BATCHES, building_rows, read_json, sha256, utc_now
@@ -19,6 +20,7 @@ def main() -> int:
     args = parser.parse_args()
     root = args.root.absolute()
     database = root / "data" / "server_batches_004_008.sqlite"
+    reserve_database = root / "data" / "spo_replacement_reserve.sqlite"
     config_path = root / "config" / "poc.json"
     blockers: list[str] = []
     warnings: list[str] = []
@@ -27,6 +29,8 @@ def main() -> int:
         blockers.append("portable SQLite database is missing")
     if not config_path.is_file():
         blockers.append("portable config is missing")
+    if not reserve_database.is_file():
+        blockers.append("SPO replacement reserve database is missing")
     config = (
         json.loads(config_path.read_text(encoding="utf-8"))
         if config_path.is_file()
@@ -41,6 +45,74 @@ def main() -> int:
         blockers.append("portable queue does not end at rank 375")
     if package.get("phase") != "data_generation_only_no_ml":
         blockers.append("package phase is not data-generation-only")
+    replacement_policy = package.get("spo_replacement_policy", {})
+    if (
+        replacement_policy.get("schema")
+        != "spo-full-catalog-nearest-replacement-v2"
+    ):
+        blockers.append("SPO full-catalog replacement policy is not locked")
+    if (
+        replacement_policy.get("invalid_spo_action")
+        != "quarantine_and_refill_same_queue_slot"
+    ):
+        blockers.append("SPO invalid-result quarantine action is not locked")
+    if replacement_policy.get(
+        "downstream_response_used_for_selection"
+    ) is not False:
+        blockers.append(
+            "SPO replacement selection must not use downstream response"
+        )
+    if (
+        replacement_policy.get("reserve_scope")
+        != "complete_five_storey_catalog"
+    ):
+        blockers.append("complete five-storey replacement catalog is not locked")
+    streaming_policy = package.get("streaming_pipeline", {})
+    if (
+        streaming_policy.get("schema")
+        != "streaming-spo-to-fragility-v2"
+    ):
+        blockers.append("streaming SPO-to-fragility policy is not locked")
+    if streaming_policy.get("wait_for_all_spo_before_ida") is not False:
+        blockers.append("Full IDA is still gated by batch-wide SPO completion")
+    if (
+        streaming_policy.get(
+            "release_building_to_ida_after_own_spo_and_gm_selection"
+        )
+        is not True
+    ):
+        blockers.append("per-building SPO-to-IDA release is not enabled")
+    if (
+        streaming_policy.get("wait_for_all_ida_before_fragility")
+        is not False
+    ):
+        blockers.append(
+            "fragility is still gated by batch-wide IDA completion"
+        )
+    if (
+        streaming_policy.get(
+            "release_building_to_fragility_after_own_full_ida"
+        )
+        is not True
+    ):
+        blockers.append("per-building IDA-to-fragility release is not enabled")
+    orchestrator_source = root / "server_orchestrator.py"
+    orchestrator_text = (
+        orchestrator_source.read_text(encoding="utf-8")
+        if orchestrator_source.is_file()
+        else ""
+    )
+    for required_symbol in (
+        "def run_streaming_spo_ida(",
+        "def streaming_worksets(",
+        "def _run_stream_fragility(",
+        "run_streaming_spo_ida(state, batch_id, workers)",
+    ):
+        if required_symbol not in orchestrator_text:
+            blockers.append(
+                f"streaming orchestrator implementation missing: "
+                f"{required_symbol}"
+            )
     checkpoint_policy = package.get("checkpoint_policy", {})
     if checkpoint_policy.get("sqlite_synchronous") != "FULL":
         blockers.append("SQLite FULL-sync checkpoint policy is not locked")
@@ -136,6 +208,113 @@ def main() -> int:
             }
         finally:
             connection.close()
+    if reserve_database.is_file():
+        reserve_manifest = read_json(
+            root / "data" / "spo_replacement_reserve_manifest.json", {}
+        )
+        reserve_connection = sqlite3.connect(
+            reserve_database, timeout=60.0
+        )
+        try:
+            reserve_integrity = reserve_connection.execute(
+                "PRAGMA integrity_check"
+            ).fetchone()[0]
+            if reserve_integrity != "ok":
+                blockers.append(
+                    "SPO replacement reserve integrity check failed: "
+                    f"{reserve_integrity}"
+                )
+            catalogue_count = int(
+                reserve_connection.execute(
+                    """
+                    SELECT COUNT(*) FROM building_catalog
+                    WHERE stories=5
+                    """
+                ).fetchone()[0]
+            )
+            valid_count = int(
+                reserve_connection.execute(
+                    """
+                    SELECT COUNT(*) FROM building_catalog
+                    WHERE stories=5 AND valid=1
+                    """
+                ).fetchone()[0]
+            )
+            reserve_count = int(
+                reserve_connection.execute(
+                    """
+                    SELECT COUNT(*) FROM building_catalog
+                    WHERE stories=5 AND valid=1 AND selected=0
+                    """
+                ).fetchone()[0]
+            )
+            if reserve_count < 225:
+                blockers.append(
+                    "SPO replacement reserve is too small: "
+                    f"{reserve_count} models"
+                )
+            if (
+                reserve_manifest.get("schema")
+                != "full-five-storey-catalog-v2"
+            ):
+                blockers.append("full five-storey catalog manifest is invalid")
+            if (
+                reserve_manifest.get("design_metadata_storage")
+                != "zlib-compressed-utf8-lossless"
+            ):
+                blockers.append(
+                    "full catalog lossless metadata storage is not locked"
+                )
+            if (
+                reserve_manifest.get("target_database_sha256")
+                != sha256(reserve_database)
+            ):
+                blockers.append("full catalog file checksum is invalid")
+            corrupt_metadata: list[str] = []
+            for row in reserve_connection.execute(
+                """
+                SELECT building_id,design_metadata_json
+                FROM building_catalog
+                """
+            ):
+                try:
+                    compressed = row[1]
+                    if not isinstance(compressed, bytes):
+                        raise TypeError("metadata is not a compressed blob")
+                    decoded = json.loads(
+                        zlib.decompress(compressed).decode("utf-8")
+                    )
+                    if not isinstance(decoded, dict):
+                        raise TypeError("metadata JSON is not an object")
+                except (
+                    TypeError,
+                    UnicodeDecodeError,
+                    json.JSONDecodeError,
+                    zlib.error,
+                ):
+                    corrupt_metadata.append(str(row[0]))
+                    if len(corrupt_metadata) >= 5:
+                        break
+            if corrupt_metadata:
+                blockers.append(
+                    "full catalog contains corrupt compressed metadata: "
+                    + ",".join(corrupt_metadata)
+                )
+            expected_counts = {
+                "catalogue_model_count": catalogue_count,
+                "valid_model_count": valid_count,
+                "eligible_replacement_model_count": reserve_count,
+            }
+            for key, actual in expected_counts.items():
+                if int(reserve_manifest.get(key, -1)) != actual:
+                    blockers.append(
+                        f"full catalog manifest count mismatch: {key}"
+                    )
+            db_summary["five_storey_catalog_count"] = catalogue_count
+            db_summary["five_storey_valid_model_count"] = valid_count
+            db_summary["spo_replacement_reserve_count"] = reserve_count
+        finally:
+            reserve_connection.close()
 
     if not args.build_check:
         if sys.version_info[:2] != (3, 10) or platform.architecture()[0] != "64bit":

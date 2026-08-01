@@ -1,6 +1,6 @@
 {
   "schema": "rc-fragility-portable-batches-004-008-v1",
-  "created_utc": "2026-07-31T07:47:40.912598+00:00",
+  "created_utc": "2026-08-01T10:52:37.406452+00:00",
   "source_project": "D:\\QCE-NAS\\Ekaraj Private Data\\Civil Engineering\\phD\\Research\\Demo Program",
   "queue_rank_range": [
     151,
@@ -29,14 +29,24 @@
       375
     ]
   },
-  "scientific_config_sha256": "9af343b0d1eaa0934326025f83fd3e58c3748dbedc96eba27ae3b6f7e0c2291f",
-  "database_sha256": "7f1b561864022098a3ff878912d2483be5d5cf02be8a17e3644371ca8c1cda7c",
+  "scientific_config_sha256": "f68a23fd3b75a3943fef6fa04ccb1cd36cae79377387f3ff831ed4982c288630",
+  "database_sha256": "c1049d9db371ae9e92b54de3c732d4fff19cfd9614179bd544619261e83fbd71",
   "controller_model_sha256": "154725ad03dfd7148cc1051dae4f31863740cc37baacc2e9bdbd4e3aaa2c72b8",
   "required_files": [
     {
+      "path": "APPLY_SPO_REPLACEMENT_PATCH.bat",
+      "size_bytes": 641,
+      "sha256": "f04b8f86bc1906502d5f3d3e84bd25c2c4ac6b328115772ff8e4a2955dd4afea"
+    },
+    {
+      "path": "README_SPO_REPLACEMENT_PATCH_TH.txt",
+      "size_bytes": 2702,
+      "sha256": "064dbcfc9b7b2fb6bc932ec0c6abe4e29bb42c90b02c779e2658c26618ed1899"
+    },
+    {
       "path": "README_TH.md",
-      "size_bytes": 9994,
-      "sha256": "c9b5fd7c7d4d39a436f4c53afde55f077a1092c2bac96522cc38ddf1bd92d386"
+      "size_bytes": 13705,
+      "sha256": "505c4c3f13c4411c1142b552ff030b2d7e0078f33deb6667f97ebeaa7622b558"
     },
     {
       "path": "SETUP_ENV.bat",
@@ -49,9 +59,14 @@
       "sha256": "3a35ef3977dd973d62e6260418ecc118062e9858d3dc7e7f1cacc684101c2683"
     },
     {
+      "path": "build_spo_replacement_reserve.py",
+      "size_bytes": 5905,
+      "sha256": "c1d5254715c300762ca585b14e667d4502038a51e67e2470356762131c5b02d1"
+    },
+    {
       "path": "config/poc.json",
-      "size_bytes": 23016,
-      "sha256": "9af343b0d1eaa0934326025f83fd3e58c3748dbedc96eba27ae3b6f7e0c2291f"
+      "size_bytes": 24052,
+      "sha256": "f68a23fd3b75a3943fef6fa04ccb1cd36cae79377387f3ff831ed4982c288630"
     },
     {
       "path": "data/ground_motion/processed/analysis_v2_dt001_pwsa150_350/CMS-T0.2-P01_X.txt",
@@ -295,13 +310,23 @@
     },
     {
       "path": "data/server_batches_004_008.sqlite",
-      "size_bytes": 4018176,
-      "sha256": "7f1b561864022098a3ff878912d2483be5d5cf02be8a17e3644371ca8c1cda7c"
+      "size_bytes": 4104192,
+      "sha256": "c1049d9db371ae9e92b54de3c732d4fff19cfd9614179bd544619261e83fbd71"
+    },
+    {
+      "path": "data/spo_replacement_reserve.sqlite",
+      "size_bytes": 43491328,
+      "sha256": "d264a7e7b61d83fb3dedc6ebe9df3a2fe703065fe2a6e3ded9a3c6df58a1ae24"
+    },
+    {
+      "path": "data/spo_replacement_reserve_manifest.json",
+      "size_bytes": 997,
+      "sha256": "12f1d9254ec1f9823dbb079bd639c76f9aadd223f7d1db3c2b79df9377d0bad2"
     },
     {
       "path": "export_results.py",
-      "size_bytes": 16762,
-      "sha256": "5d3747ecac87b00fa0e2a9daef642a1f6f684db17ffe6b29783b5a4369e19d02"
+      "size_bytes": 19376,
+      "sha256": "e480966526b6d55357a1040635414c236562a5600733e024e916a673231bfa87"
     },
     {
       "path": "frozen_target_buildings.json",
@@ -310,8 +335,13 @@
     },
     {
       "path": "import_results.py",
-      "size_bytes": 19041,
-      "sha256": "3f31d9308f0d772efa8f4a40f6133564563c3d9ca5c658960cbef50e5917a47d"
+      "size_bytes": 24544,
+      "sha256": "96064f305b95587ff5803fa20f9e902febb5787367b01cd985ab6c1b92c51b11"
+    },
+    {
+      "path": "install_spo_replacement_patch.py",
+      "size_bytes": 5184,
+      "sha256": "95d1bcd1571cfddcdb64c359bc118bfebe26c230119f48bb9848f724bb6d390f"
     },
     {
       "path": "models/active_ida_controller_v1.joblib",
@@ -320,13 +350,13 @@
     },
     {
       "path": "portable_common.py",
-      "size_bytes": 17739,
-      "sha256": "3918a4547074896b23b2c378d24776788a57db8286cb9d1772e5d05e51cf7e28"
+      "size_bytes": 20123,
+      "sha256": "37796e34f45e6be10117b8c6fc79167b7a5df7428a08cfd4cd19e41822b29416"
     },
     {
       "path": "preflight_portable.py",
-      "size_bytes": 7357,
-      "sha256": "6d5b3e3532725694f58469f5f2077b79acafa77b862da2832402ae34d7943dd9"
+      "size_bytes": 14338,
+      "sha256": "0e41312020220bd4fe071b34ba210a1da791bd56510c9dd05a60ada5505ccfa9"
     },
     {
       "path": "prepare_portable_runtime.py",
@@ -339,19 +369,24 @@
       "sha256": "489d7ef87cb4746061983cfc073f87cbe35b039882cc8bde26dba494dde30317"
     },
     {
+      "path": "replacement_policy.py",
+      "size_bytes": 23140,
+      "sha256": "a14f6e5a3e9bc53f82ec0ee5d4750d1bf796bcb6bee36ef9250b8a920627ed31"
+    },
+    {
       "path": "requirements-lock.txt",
       "size_bytes": 518,
       "sha256": "d4b79ee94bee840b54479ce8dd2ea37999cb2b1d0ebdeca77626bb7fb4f08190"
     },
     {
       "path": "server_dashboard.py",
-      "size_bytes": 17106,
-      "sha256": "6c865edcff61218af4d1b66d4057d67804e8f83304a2613b2f8221b1b4813d1f"
+      "size_bytes": 17667,
+      "sha256": "53f490cad7142fdcc78391b1cef6d2c849497f5f97124f736d046ade7a81394c"
     },
     {
       "path": "server_orchestrator.py",
-      "size_bytes": 22456,
-      "sha256": "5e77a18c3d1d9aa1aa1da5bfd05fefa49388ecf6ac9175df5bd3a05aef4043f2"
+      "size_bytes": 56110,
+      "sha256": "738d392040204be10eb9edf31f40788cc0c5f909aa5390f1e4396c67c5e29e63"
     },
     {
       "path": "src/fragility_poc/__init__.py",
@@ -447,6 +482,11 @@
       "path": "src/fragility_poc/structural.py",
       "size_bytes": 117595,
       "sha256": "2c36eafa1d6dc774a181e17182281909981b1dc3a07bca648d1772e6012eb2a4"
+    },
+    {
+      "path": "test_replacement_policy.py",
+      "size_bytes": 24679,
+      "sha256": "82ec0f5b2a8b2b1972355f05021e19b90058e96ecdb1d6462b45b5de8e63bdfe"
     },
     {
       "path": "wheelhouse/colorama-0.4.6-py2.py3-none-any.whl",

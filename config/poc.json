@@ -632,6 +632,27 @@
     "queue_rank_end": 375,
     "building_count": 225,
     "phase": "data_generation_only_no_ml",
+    "spo_replacement_policy": {
+      "schema": "spo-full-catalog-nearest-replacement-v2",
+      "invalid_spo_action": "quarantine_and_refill_same_queue_slot",
+      "reserve_database": "data/spo_replacement_reserve.sqlite",
+      "reserve_scope": "complete_five_storey_catalog",
+      "eligible_candidate_filter": "valid=1 AND selected=0",
+      "maximum_replacements_per_slot": 20,
+      "downstream_response_used_for_selection": false,
+      "invalid_spo_is_never_relabelled_as_collapse": true
+    },
+    "streaming_pipeline": {
+      "schema": "streaming-spo-to-fragility-v2",
+      "wait_for_all_spo_before_ida": false,
+      "release_building_to_ida_after_own_spo_and_gm_selection": true,
+      "wait_for_all_ida_before_fragility": false,
+      "release_building_to_fragility_after_own_full_ida": true,
+      "concurrent_spo_producers": 1,
+      "ida_worker_pool_default": 6,
+      "newly_ready_buildings_queue_for_next_ida_wave": true,
+      "persisted_postconditions_are_the_only_resume_state": true
+    },
     "checkpoint_policy": {
       "spo": "commit_after_each_completed_building",
       "nltha": "atomic_fsync_json_after_each_completed_target_im; reused_when_an_incomplete_curve_resumes",

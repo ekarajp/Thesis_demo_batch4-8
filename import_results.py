@@ -160,7 +160,7 @@ def verify_scientific_identity(
     main_connection: sqlite3.Connection,
     result_connection: sqlite3.Connection,
     manifest: dict[str, Any],
-) -> None:
+) -> list[dict[str, Any]]:
     config = main_root / "config" / "poc.json"
     if scientific_config_signature(config) != str(
         manifest["scientific_config_signature"]
@@ -193,13 +193,19 @@ def verify_scientific_identity(
     }
     placeholders = ",".join("?" for _ in expected)
     current = {
-        str(row["building_id"]): (
-            int(row["queue_rank"]),
-            str(row["model_hash"]),
-        )
+        str(row["building_id"]): {
+            "queue_rank": (
+                int(row["queue_rank"])
+                if row["queue_rank"] is not None
+                else None
+            ),
+            "model_hash": str(row["model_hash"]),
+            "selected": int(row["selected"]),
+        }
         for row in main_connection.execute(
             f"""
-            SELECT building_id,queue_rank,model_hash FROM building_catalog
+            SELECT building_id,queue_rank,model_hash,selected
+            FROM building_catalog
             WHERE building_id IN ({placeholders})
             """,
             list(expected),
@@ -211,13 +217,145 @@ def verify_scientific_identity(
             str(row["model_hash"]),
         )
         for row in result_connection.execute(
-            "SELECT building_id,queue_rank,model_hash FROM building_catalog"
+            """
+            SELECT building_id,queue_rank,model_hash
+            FROM building_catalog WHERE selected=1
+            """
         )
     }
-    if current != expected or result != expected:
+    if result != expected:
         raise RuntimeError(
-            "Building-ID/rank/model-hash identity does not match exactly"
+            "Server result Building-ID/rank/model-hash identity does not "
+            "match its manifest"
         )
+    if set(current) != set(expected):
+        raise RuntimeError(
+            "One or more server replacement Building IDs do not exist in "
+            "the main five-storey design-space catalogue"
+        )
+    for building_id, (_rank, model_hash) in expected.items():
+        if current[building_id]["model_hash"] != model_hash:
+            raise RuntimeError(
+                f"Model hash differs for replacement candidate {building_id}"
+            )
+
+    histories = [
+        dict(row) for row in manifest.get("spo_replacements", [])
+    ]
+    by_slot: dict[int, list[dict[str, Any]]] = {}
+    for row in histories:
+        by_slot.setdefault(int(row["slot_rank"]), []).append(row)
+    plans: list[dict[str, Any]] = []
+    expected_by_rank = {
+        int(rank): building_id
+        for building_id, (rank, _model_hash) in expected.items()
+    }
+    for rank, expected_id in sorted(expected_by_rank.items()):
+        main_row = current[expected_id]
+        if (
+            main_row["queue_rank"] == rank
+            and main_row["selected"] == 1
+        ):
+            continue
+        history = sorted(
+            by_slot.get(rank, []), key=lambda row: int(row["generation"])
+        )
+        if not history:
+            raise RuntimeError(
+                f"Building {expected_id} is not currently assigned rank "
+                f"{rank} and has no audited SPO replacement history"
+            )
+        generations = [int(row["generation"]) for row in history]
+        if generations != list(range(1, len(history) + 1)):
+            raise RuntimeError(
+                f"Non-contiguous replacement generations at rank {rank}"
+            )
+        original_ids = {
+            str(row["original_building_id"]) for row in history
+        }
+        if len(original_ids) != 1:
+            raise RuntimeError(
+                f"Replacement history changes original identity at rank {rank}"
+            )
+        for previous, following in zip(history, history[1:]):
+            if str(previous["replacement_building_id"]) != str(
+                following["failed_building_id"]
+            ):
+                raise RuntimeError(
+                    f"Broken SPO replacement chain at rank {rank}"
+                )
+        latest = history[-1]
+        if str(latest["replacement_building_id"]) != expected_id:
+            raise RuntimeError(
+                f"Manifest current building does not close replacement "
+                f"chain at rank {rank}"
+            )
+        if str(latest["replacement_model_hash"]) != str(
+            expected[expected_id][1]
+        ):
+            raise RuntimeError(
+                f"Replacement model hash is inconsistent at rank {rank}"
+            )
+        active = main_connection.execute(
+            """
+            SELECT building_id FROM building_catalog
+            WHERE selected=1 AND queue_rank=?
+            """,
+            (rank,),
+        ).fetchall()
+        allowed_previous = {
+            str(next(iter(original_ids))),
+            *{
+                str(row["failed_building_id"])
+                for row in history
+            },
+            expected_id,
+        }
+        if len(active) != 1 or str(active[0]["building_id"]) not in (
+            allowed_previous
+        ):
+            raise RuntimeError(
+                f"Main catalogue rank {rank} has an unrelated active model"
+            )
+        plans.append(
+            {
+                "slot_rank": rank,
+                "previous_building_id": str(active[0]["building_id"]),
+                "replacement_building_id": expected_id,
+                "history": history,
+            }
+        )
+    return plans
+
+
+def apply_replacement_assignments(
+    connection: sqlite3.Connection,
+    plans: list[dict[str, Any]],
+) -> None:
+    """Apply verified rank substitutions in the same import transaction."""
+    for plan in plans:
+        rank = int(plan["slot_rank"])
+        replacement_id = str(plan["replacement_building_id"])
+        connection.execute(
+            """
+            UPDATE building_catalog
+            SET selected=0,queue_rank=NULL
+            WHERE selected=1 AND queue_rank=? AND building_id<>?
+            """,
+            (rank, replacement_id),
+        )
+        updated = connection.execute(
+            """
+            UPDATE building_catalog
+            SET selected=1,queue_rank=?,valid=1,invalid_reason=NULL
+            WHERE building_id=?
+            """,
+            (rank, replacement_id),
+        )
+        if updated.rowcount != 1:
+            raise RuntimeError(
+                f"Could not assign replacement {replacement_id} to rank {rank}"
+            )
 
 
 def prepare_incoming_rows(
@@ -407,7 +545,7 @@ def import_one(
     result_connection = sqlite3.connect(result_database)
     result_connection.row_factory = sqlite3.Row
     try:
-        verify_scientific_identity(
+        replacement_plans = verify_scientific_identity(
             main_root, main_connection, result_connection, manifest
         )
         path_mapping, copies = replacement_paths(main_root, base, manifest)
@@ -427,6 +565,9 @@ def import_one(
         raw_summary = copy_raw_files(copies)
         try:
             main_connection.execute("BEGIN IMMEDIATE")
+            apply_replacement_assignments(
+                main_connection, replacement_plans
+            )
             inserted = insert_rows(main_connection, incoming, failures)
             foreign = list(main_connection.execute("PRAGMA foreign_key_check"))
             if foreign:
@@ -452,6 +593,18 @@ def import_one(
             "inserted_rows": inserted,
             "raw_files": raw_summary,
             "scientific_identity_verified": True,
+            "spo_replacement_assignments_applied": [
+                {
+                    "slot_rank": int(plan["slot_rank"]),
+                    "previous_building_id": str(
+                        plan["previous_building_id"]
+                    ),
+                    "replacement_building_id": str(
+                        plan["replacement_building_id"]
+                    ),
+                }
+                for plan in replacement_plans
+            ],
         }
         report_dir = (
             main_root / "outputs" / "5storey" / "server_result_imports"

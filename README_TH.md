@@ -53,6 +53,41 @@ workers ทั้งหมด เก็บ checkpoint ที่เสร็จ�
 ใน UI ช่อง `NLTHA checkpoints` นับไฟล์ที่บันทึกจริงบนดิสก์ด้วย จึงมองเห็น
 งานที่เสร็จแล้วแม้ IDA curve ปัจจุบันยังไม่ปิดครบสาม limit states
 
+## เมื่อ SPO อาคารหนึ่งหาคำตอบที่ valid ไม่ได้
+
+โปรแกรมไม่ถือ numerical timeout/nonconvergence เป็นการพังของอาคาร และไม่ส่ง
+อาคารนั้นเข้า IDA โดยฝืนเกณฑ์ แต่จะดำเนินการดังนี้โดยอัตโนมัติ:
+
+1. เก็บแถว failure, partial SPO curve และ mechanism history เดิมไว้ใน
+   `spo_quarantine` เพื่อรอตรวจซ่อมภายหลัง
+2. คง queue slot เดิม แต่เลือกโมเดล valid ที่ยังไม่เคยใช้และใกล้ที่สุดจาก
+   catalog อาคาร 5 ชั้นทั้งหมด 6,908 แบบ โดยเลือกได้จาก feasible unused
+   models 6,526 แบบ ใช้เฉพาะ geometry, material, load,
+   strength tiers, SCWB class/ratio และ axial ratio ไม่ใช้ผล SPO/IDA/fragility
+3. ทำ SPO ของตัวแทน และทำซ้ำด้วย candidate ถัดไปหากยังไม่ valid จนได้จำนวน
+   active SPO ครบตาม Batch
+4. อาคารที่ SPO valid แล้วจะไม่ถูกรันซ้ำ เมื่ออาคารใดเลือก GM ผ่านเกณฑ์
+   โปรแกรมจะส่งอาคารนั้นเข้า Full IDA ทันที โดยไม่รอ SPO ของทั้ง Batch
+   ขณะเดียวกัน SPO อาคารถัดไปยังทำต่อด้วย process แยก
+
+## Streaming SPO → Full IDA → Fragility
+
+- ใช้ SPO producer 1 process และ Full-IDA consumer pool ค่าเริ่มต้น 6 workers
+  พร้อมกัน จึงใช้ทรัพยากรเครื่องได้ต่อเนื่อง
+- GM selection ทำเฉพาะ Building IDs ที่มี SPO valid แล้วเท่านั้น
+- ถ้า IDA wave กำลังทำงาน อาคารที่ SPO เสร็จใหม่จะเข้าคิวและเริ่มใน IDA wave
+  ถัดไปทันทีที่ worker pool ว่าง ไม่ต้องรอให้ SPO ครบทั้ง Batch
+- เมื่อ Full IDA ของอาคารหนึ่งครบ primary CMS และ PWSA sensitivity แล้ว
+  โปรแกรมจะ fit Fragility IO/LS/CP ของอาคารนั้นทันที แม้ IDA ของอาคารอื่น
+  ยังรันอยู่ ไม่รอครบทั้ง Batch
+- การ Pause/ไฟดับ/เปิดทำต่อ อาศัยผลที่บันทึกจริงใน SQLite และ raw checkpoint
+  เท่านั้น ไม่อาศัยเพียงสถานะในหน้า UI จึงไม่รันอาคารหรือจุด IM ที่เสร็จแล้วซ้ำ
+
+UI จะแสดงจำนวน `SPO quarantine`, generation ของตัวแทน และ Building ID
+ต้นฉบับ ประวัติทั้งหมดถูกเขียนลง `spo_replacement_history` แบบ deterministic
+เพื่อให้ตรวจสอบย้อนกลับได้ และ CSV/ไฟล์ raw ของ quarantine จะรวมอยู่ใน ZIP
+ผลลัพธ์ด้วย
+
 ## ตำแหน่งผลลัพธ์
 
 - ตารางและหน้าอ่านง่าย: `outputs\batch_004` ถึง `outputs\batch_008`

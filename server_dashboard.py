@@ -86,16 +86,17 @@ overflow:hidden;min-width:100px}.bar span{height:100%;display:block;background:v
    <div class="card"><div class="label">สถานะ</div><div class="value" id="status">–</div></div>
    <div class="card"><div class="label">ความคืบหน้ารวม</div><div class="value" id="overall">0%</div></div>
    <div class="card"><div class="label">อาคารเสร็จครบ</div><div class="value" id="completed">0 / 225</div></div>
+   <div class="card"><div class="label">SPO quarantine</div><div class="value" id="quarantined">0</div></div>
    <div class="card"><div class="label">กำลังทำ</div><div class="value" id="current" style="font-size:16px">–</div></div>
  </div>
  <section class="panel"><h2>สถานะแต่ละ Batch</h2><div class="scroll"><table>
    <thead><tr><th>Batch</th><th>อันดับ</th><th>เสร็จ</th><th>SPO</th>
-   <th>Fragility</th><th>Progress</th><th>ปัญหาค้าง</th><th>ZIP ผลลัพธ์</th></tr></thead>
+   <th>Fragility</th><th>Progress</th><th>SPO replaced</th><th>ปัญหาค้าง</th><th>ZIP ผลลัพธ์</th></tr></thead>
    <tbody id="batches"></tbody></table></div></section>
  <section class="panel"><h2>สถานะรายอาคาร (เปอร์เซ็นต์จากผลที่เซฟจริง)</h2>
    <div class="scroll"><table><thead><tr><th>Rank</th><th>Building ID</th><th>Batch</th>
    <th>%</th><th>SPO</th><th>T1 (s)</th><th>CMS IDA curves</th><th>PWSA SF=1</th>
-   <th>Fragility</th><th>NLTHA checkpoints</th><th>ปัญหาค้าง</th></tr></thead>
+   <th>Fragility</th><th>Replacement</th><th>NLTHA checkpoints</th><th>ปัญหาค้าง</th></tr></thead>
    <tbody id="buildings"></tbody></table></div></section>
  <section class="panel"><h2>ไฟล์พร้อมก๊อปกลับ</h2><div id="exports" style="padding:15px"></div></section>
  <p class="small">หน้าเว็บจะรีเฟรชทุก 5 วินาที การกด Pause จะหยุด process tree
@@ -118,7 +119,9 @@ async function refresh(){try{let d=await api('/api/status');let s=d.state,p=d.pr
 document.getElementById('status').textContent=s.status||'ready';
 document.getElementById('overall').textContent=(p.average_percent||0).toFixed(1)+'%';
 document.getElementById('completed').textContent=`${p.completed_buildings} / ${p.total_buildings}`;
-document.getElementById('current').textContent=[s.current_batch,s.current_stage].filter(Boolean).join(' / ')||'–';
+document.getElementById('quarantined').textContent=p.quarantined_spo_models||0;
+let active=Object.entries(s.active_child_pids||{}).map(([role,pid])=>`${role.toUpperCase()} PID ${pid}`).join(' + ');
+document.getElementById('current').textContent=([s.current_batch,s.current_stage].filter(Boolean).join(' / ')||'–')+(active?` · ${active}`:'');
 let m=document.getElementById('message');m.textContent=s.message||'Ready';
 m.className='message '+(s.status==='needs_attention'?'warn':'');
 document.getElementById('start').disabled=d.runner_running;
@@ -129,7 +132,8 @@ document.getElementById('batches').innerHTML=p.batches.map(b=>{let z=ex.get(b.ba
 return `<tr><td>${esc(b.batch_id)}</td><td>${b.rank_start}–${b.rank_end}</td>
 <td>${b.completed_buildings}/${b.building_count}</td><td>${b.spo_complete}</td>
 <td>${b.fragility_complete}</td><td><div class=bar><span style="width:${b.average_percent}%"></span></div>
-${b.average_percent.toFixed(1)}%</td><td class="${b.unresolved_failures?'bad':'ok'}">${b.unresolved_failures}</td>
+${b.average_percent.toFixed(1)}%</td><td>${b.quarantined_spo_models||0}</td>
+<td class="${b.unresolved_failures?'bad':'ok'}">${b.unresolved_failures}</td>
 <td>${z?`<a href="${z.url}">ดาวน์โหลด ZIP</a>`:'–'}</td></tr>`}).join('');
 document.getElementById('buildings').innerHTML=p.buildings.map(b=>`<tr>
 <td>${b.queue_rank}</td><td><code>${esc(b.building_id)}</code></td><td>${esc(b.batch_id)}</td>
@@ -138,6 +142,7 @@ document.getElementById('buildings').innerHTML=p.buildings.map(b=>`<tr>
 <td>${b.primary_curves_complete}/${b.primary_curves_total||'–'}</td>
 <td class="${stateClass(b.pwsa)}">${b.pwsa}</td>
 <td class="${stateClass(b.fragility)}">${b.fragility}</td>
+<td>${b.replacement_generation?`Gen ${b.replacement_generation}<span class=small> for ${esc(b.original_building_id)}</span>`:'original'}</td>
 <td>${b.saved_nltha_checkpoint_count}<span class=small> saved; ${b.ida_run_count} in DB (${fmt(b.ida_runtime_s)})</span></td>
 <td class="${b.unresolved_failures?'bad':'ok'}">${b.unresolved_failures}</td></tr>`).join('');
 document.getElementById('exports').innerHTML=d.exports.length?d.exports.map(x=>
